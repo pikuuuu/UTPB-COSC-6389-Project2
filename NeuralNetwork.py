@@ -13,7 +13,7 @@ class DataNormalizer:
         min_vals = data.min(axis=0)
         max_vals = data.max(axis=0)
         
-        # Avoid division by zero
+       
         max_vals[max_vals == min_vals] = 1
         
         normalized = (data - min_vals) / (max_vals - min_vals)
@@ -23,42 +23,32 @@ class DataLoader:
     @staticmethod
     def load_csv(filepath, has_header=True, input_columns=None, output_columns=None):
         """
-        Load data from CSV file
-        
-        Args:
-            filepath (str): Path to CSV file
-            has_header (bool): Whether CSV has a header row
-            input_columns (list): Columns to use as inputs (None = auto-detect)
-            output_columns (list): Columns to use as outputs (None = last column)
-        
-        Returns:
-            tuple: (inputs, outputs)
         """
         with open(filepath, 'r') as csvfile:
             reader = csv.reader(csvfile)
             
-            # Handle header
+            
             if has_header:
                 headers = next(reader)
             
-            # Read all data
+           
             data = list(reader)
             data = [[float(cell) for cell in row] for row in data]
             
-            # Convert to numpy for easier manipulation
+           
             data = np.array(data)
             
-            # Auto-detect input and output columns if not specified
+            
             if input_columns is None:
                 input_columns = list(range(data.shape[1] - 1))
             if output_columns is None:
                 output_columns = [data.shape[1] - 1]
             
-            # Split into inputs and outputs
+            
             inputs = data[:, input_columns]
             outputs = data[:, output_columns]
             
-            # Normalize data
+            
             inputs, input_mins, input_maxs = DataNormalizer.min_max_normalize(inputs)
             outputs, output_mins, output_maxs = DataNormalizer.min_max_normalize(outputs)
             
@@ -139,12 +129,12 @@ class Neuron:
 
         for in_axon in self.inputs:
             in_neuron = in_axon.input
-            # Update connection weight
+            
             in_axon.weight -= learning_rate * delta * in_neuron.result
-            # Propagate error
+            
             in_neuron.error += delta * in_axon.weight
 
-        # Update bias
+        
         self.bias -= learning_rate * delta
         return delta
 
@@ -162,19 +152,19 @@ class NeuralNetwork:
         self.hidden_layers = []
         self.outputs = []
         
-        # Create input layer
+        
         for idx in range(input_count):
             self.inputs.append(
                 Neuron(activation_func, derivative_func, input_idx=idx, bias=1.0)
             )
         
-        # Create hidden layers
+        
         prev_layer = self.inputs
         for layer_width in hidden_layers:
             current_layer = []
             for _ in range(layer_width):
                 neuron = Neuron(activation_func, derivative_func)
-                # Connect to previous layer
+                
                 for prev_neuron in prev_layer:
                     neuron.connect_input(prev_neuron)
                     prev_neuron.connect_output(neuron)
@@ -182,7 +172,7 @@ class NeuralNetwork:
             self.hidden_layers.append(current_layer)
             prev_layer = current_layer
         
-        # Create output layer
+        
         for _ in range(output_count):
             output_neuron = Neuron(activation_func, derivative_func)
             for prev_neuron in prev_layer:
@@ -191,29 +181,29 @@ class NeuralNetwork:
             self.outputs.append(output_neuron)
 
     def train(self, inputs, targets, learning_rate=0.1):
-        # Forward propagation
+        
         self.predict(inputs)
         
-        # Calculate output errors
+        
         for i, output_neuron in enumerate(self.outputs):
             output_neuron.error = targets[i] - output_neuron.result
         
-        # Backpropagate
+        
         for output_neuron in reversed(self.outputs):
             output_neuron.back_prop(learning_rate)
         
-        # Backpropagate through hidden layers
+        
         for layer in reversed(self.hidden_layers):
             for neuron in layer:
                 neuron.back_prop(learning_rate)
 
     def predict(self, inputs):
-        # Reset results for all neurons
+       
         for neuron in self.inputs + [n for layer in self.hidden_layers for n in layer] + self.outputs:
             if neuron.index == -1:
                 neuron.result = 0.0
         
-        # Perform forward propagation
+        
         return [output_neuron.forward_prop(inputs) for output_neuron in self.outputs]
 
 
@@ -222,59 +212,59 @@ class EnhancedNeuralNetworkUI:
         self.master = master
         master.title("Enhanced Neural Network")
         
-        # Create main frame
+       
         self.main_frame = tk.Frame(master)
         self.main_frame.pack(fill=tk.BOTH, expand=True)
         
-        # Configuration Frame
+        
         self.config_frame = tk.Frame(self.main_frame)
         self.config_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
         
-        # Network Configuration Widgets
+       
         self.setup_configuration_widgets()
         
-        # Canvas for network visualization
+        
         self.canvas_frame = tk.Frame(self.main_frame)
         self.canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
         
         self.canvas = tk.Canvas(self.canvas_frame, width=800, height=600, bg='white')
         self.canvas.pack(expand=True, fill=tk.BOTH)
         
-        # Status Frame
+        
         self.status_frame = tk.Frame(self.main_frame)
         self.status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
         
         self.status_label = tk.Label(self.status_frame, text="Ready", anchor='w')
         self.status_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
         
-        # Network state
+        
         self.current_network = None
         self.current_dataset = None
         self.normalization_params = None
     
     def setup_configuration_widgets(self):
-        # Input Count
+        
         tk.Label(self.config_frame, text="Number of Inputs:").grid(row=0, column=0)
         self.input_entry = tk.Entry(self.config_frame)
         self.input_entry.grid(row=0, column=1)
         
-        # Hidden Layers
+        
         tk.Label(self.config_frame, text="Hidden Layer Sizes:").grid(row=1, column=0)
         self.hidden_layers_entry = tk.Entry(self.config_frame)
         self.hidden_layers_entry.grid(row=1, column=1)
         
-        # Output Count
+        
         tk.Label(self.config_frame, text="Number of Outputs:").grid(row=2, column=0)
         self.output_entry = tk.Entry(self.config_frame)
         self.output_entry.grid(row=2, column=1)
         
-        # Activation Function
+        
         tk.Label(self.config_frame, text="Activation:").grid(row=3, column=0)
         self.activation_var = tk.StringVar(value="sigmoid")
         activation_options = ["sigmoid", "tanh", "relu"]
         tk.OptionMenu(self.config_frame, self.activation_var, *activation_options).grid(row=3, column=1)
         
-        # Buttons
+        
         tk.Button(self.config_frame, text="Load Dataset", command=self.load_dataset).grid(row=4, column=0)
         tk.Button(self.config_frame, text="Create Network", command=self.create_network).grid(row=4, column=1)
         tk.Button(self.config_frame, text="Train Network", command=self.train_network).grid(row=4, column=2)
@@ -288,10 +278,10 @@ class EnhancedNeuralNetworkUI:
             return
         
         try:
-            # Load dataset
+            
             inputs, outputs, norm_params = DataLoader.load_csv(filepath)
             
-            # Update UI with dataset dimensions
+            
             self.input_entry.delete(0, tk.END)
             self.input_entry.insert(0, str(inputs.shape[1]))
             
@@ -326,7 +316,7 @@ class EnhancedNeuralNetworkUI:
                 activation_func, derivative_func
             )
             
-            # Visualize with enhanced details
+            
             self.visualize_network_detailed()
             
             self.status_label.config(text="Network created successfully")
@@ -338,22 +328,22 @@ class EnhancedNeuralNetworkUI:
         width = self.canvas.winfo_width()
         height = self.canvas.winfo_height()
         
-        # Collect all layers
+        
         all_layers = [self.current_network.inputs] + \
                      self.current_network.hidden_layers + \
                      [self.current_network.outputs]
         
-        # Calculate spacing
+        
         layer_spacing = width / (len(all_layers) + 1)
         max_layer_size = max(len(layer) for layer in all_layers)
         
-        # Color gradient for connections
+        
         def get_connection_color(weight):
-            # Blue for positive, red for negative weights
+           
             intensity = min(abs(weight) * 5, 255)
             return f'#{int(255 if weight < 0 else 0):02x}{int(255 if weight > 0 else 0):02x}{0:02x}'
         
-        # Draw neurons and connections
+        
         for layer_idx, layer in enumerate(all_layers):
             x = layer_spacing * (layer_idx + 1)
             layer_height = height * 0.8
@@ -363,7 +353,7 @@ class EnhancedNeuralNetworkUI:
                 y = height * 0.1 + neuron_spacing * (neuron_idx + 1)
                 neuron.x, neuron.y = x, y
                 
-                # Neuron representation
+                
                 neuron_color = self.get_neuron_color(neuron.result)
                 self.canvas.create_oval(
                     x-15, y-15, x+15, y+15, 
@@ -371,11 +361,11 @@ class EnhancedNeuralNetworkUI:
                     outline='black'
                 )
                 
-                # Connections to next layer
+                
                 if layer_idx < len(all_layers) - 1:
                     next_layer = all_layers[layer_idx + 1]
                     for next_neuron in next_layer:
-                        # Find corresponding axon
+                        
                         matching_axons = [
                             axon for axon in neuron.outputs 
                             if axon.output == next_neuron
@@ -383,7 +373,7 @@ class EnhancedNeuralNetworkUI:
                         
                         if matching_axons:
                             axon = matching_axons[0]
-                            # Connection thickness based on weight magnitude
+                           
                             line_width = min(abs(axon.weight) * 3, 5)
                             
                             self.canvas.create_line(
@@ -395,7 +385,7 @@ class EnhancedNeuralNetworkUI:
     
     def get_neuron_color(self, activation):
         """Generate color based on neuron activation"""
-        # Blue gradient from pale to deep blue
+        
         intensity = int(min(max(activation, 0), 1) * 255)
         return f'#{intensity:02x}{intensity:02x}ff'
     
@@ -410,7 +400,7 @@ class EnhancedNeuralNetworkUI:
         
         inputs, outputs = self.current_dataset
         
-        # Training parameters
+       
         epochs = simpledialog.askinteger(
             "Training", "Number of Epochs:", 
             initialvalue=100, minvalue=1
@@ -419,27 +409,27 @@ class EnhancedNeuralNetworkUI:
         if not epochs:
             return
         
-        # Track training progress
+        
         training_loss = []
         
         for epoch in range(epochs):
             total_loss = 0
             
-            # Shuffle data
+            
             indices = np.random.permutation(len(inputs))
             
             for idx in indices:
-                # Train on single sample
+                
                 network_output = self.current_network.predict(inputs[idx])
                 self.current_network.train(inputs[idx], outputs[idx])
                 
-                # Calculate loss (mean squared error)
+                
                 epoch_loss = np.mean((network_output - outputs[idx])**2)
                 total_loss += epoch_loss
             
             training_loss.append(total_loss / len(inputs))
             
-            # Update visualization every 10 epochs
+            
             if epoch % 10 == 0:
                 self.visualize_network_detailed()
                 self.status_label.config(
