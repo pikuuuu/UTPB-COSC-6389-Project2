@@ -1,40 +1,102 @@
 import math
 import random
 import tkinter as tk
-from tkinter import ttk, messagebox
-import time
+from tkinter import filedialog, messagebox, simpledialog
+import csv
+import numpy as np
+
+class DataNormalizer:
+    @staticmethod
+    def min_max_normalize(data):
+        """Normalize data to range [0, 1]"""
+        data = np.array(data)
+        min_vals = data.min(axis=0)
+        max_vals = data.max(axis=0)
+        
+        # Avoid division by zero
+        max_vals[max_vals == min_vals] = 1
+        
+        normalized = (data - min_vals) / (max_vals - min_vals)
+        return normalized, min_vals, max_vals
+
+class DataLoader:
+    @staticmethod
+    def load_csv(filepath, has_header=True, input_columns=None, output_columns=None):
+        """
+        Load data from CSV file
+        
+        Args:
+            filepath (str): Path to CSV file
+            has_header (bool): Whether CSV has a header row
+            input_columns (list): Columns to use as inputs (None = auto-detect)
+            output_columns (list): Columns to use as outputs (None = last column)
+        
+        Returns:
+            tuple: (inputs, outputs)
+        """
+        with open(filepath, 'r') as csvfile:
+            reader = csv.reader(csvfile)
+            
+            # Handle header
+            if has_header:
+                headers = next(reader)
+            
+            # Read all data
+            data = list(reader)
+            data = [[float(cell) for cell in row] for row in data]
+            
+            # Convert to numpy for easier manipulation
+            data = np.array(data)
+            
+            # Auto-detect input and output columns if not specified
+            if input_columns is None:
+                input_columns = list(range(data.shape[1] - 1))
+            if output_columns is None:
+                output_columns = [data.shape[1] - 1]
+            
+            # Split into inputs and outputs
+            inputs = data[:, input_columns]
+            outputs = data[:, output_columns]
+            
+            # Normalize data
+            inputs, input_mins, input_maxs = DataNormalizer.min_max_normalize(inputs)
+            outputs, output_mins, output_maxs = DataNormalizer.min_max_normalize(outputs)
+            
+            return inputs, outputs, {
+                'input_mins': input_mins, 
+                'input_maxs': input_maxs,
+                'output_mins': output_mins, 
+                'output_maxs': output_maxs
+            }
 
 
-num_inputs = 39
-num_hidden_layers = 2
-hidden_layer_width = 20
-num_outputs = 1
-neuron_scale = 5
-axon_scale = 1
-learning_rate = 0.01
-training_data_size = 100
-activation_function = "sigmoid"
-
-def sigmoid(x):
-    return 1 / (1 + math.exp(-x))
-
-def sigmoid_derivative(x):
-    return x * (1 - x)
-
-def tanh(x):
-    return math.tanh(x)
-
-def tanh_derivative(x):
-    return 1 - x**2
-
-def relu(x):
-    return max(0, x)
-
-def relu_derivative(x):
-    return 1 if x > 0 else 0
+class ActivationFunctions:
+    @staticmethod
+    def sigmoid(x):
+        return 1 / (1 + math.exp(-x))
+    
+    @staticmethod
+    def sigmoid_derivative(x):
+        return x * (1 - x)
+    
+    @staticmethod
+    def tanh(x):
+        return math.tanh(x)
+    
+    @staticmethod
+    def tanh_derivative(x):
+        return 1 - x**2
+    
+    @staticmethod
+    def relu(x):
+        return max(0, x)
+    
+    @staticmethod
+    def relu_derivative(x):
+        return 1 if x > 0 else 0
 
 class Neuron:
-    def __init__(self, x, y, input_idx=-1, bias=0.0):
+    def __init__(self, activation_func, derivative_func, x=0, y=0, input_idx=-1, bias=0.0):
         self.x = x
         self.y = y
         self.inputs = []
@@ -43,303 +105,358 @@ class Neuron:
         self.bias = bias
         self.result = 0.0
         self.error = 0.0
-        self.b_prop_done = False
+        self.activation_func = activation_func
+        self.derivative_func = derivative_func
 
-    def connect_input(self, in_n):
-        in_axon = Axon(in_n, self)
+    def connect_input(self, in_n, weight=None):
+        if weight is None:
+            weight = random.uniform(-1, 1)
+        in_axon = Axon(in_n, self, weight)
         self.inputs.append(in_axon)
+        return in_axon
 
     def connect_output(self, out_n):
         out_axon = Axon(self, out_n)
         self.outputs.append(out_axon)
+        return out_axon
 
-    def forward_prop(self, inputs):
-        if self.result != 0.0:
-            return self.result
-        total = 0.0
+    def forward_prop(self, inputs, learning_rate=0.1):
         if self.index >= 0:
-            total = inputs[self.index]
-        else:
-            for in_axon in self.inputs:
-                in_n = in_axon.input
-                in_n.forward_prop(inputs)
-                in_val = in_n.result * in_axon.weight
-                total += in_val
+            self.result = inputs[self.index]
+            return self.result
+
+        total = sum(
+            in_axon.input.forward_prop(inputs, learning_rate) * in_axon.weight 
+            for in_axon in self.inputs
+        )
         total += self.bias
-        
-        if activation_function == "sigmoid":
-            self.result = sigmoid(total)
-        elif activation_function == "tanh":
-            self.result = tanh(total)
-        elif activation_function == "relu":
-            self.result = relu(total)
+        self.result = self.activation_func(total)
+        return self.result
 
-    def back_prop(self):
-        for out_axon in self.outputs:
-            out_n = out_axon.output
-            out_n.back_prop()
-        if self.b_prop_done:
-            return
-        
-        if activation_function == "sigmoid":
-            gradient = sigmoid_derivative(self.result)
-        elif activation_function == "tanh":
-            gradient = tanh_derivative(self.result)
-        elif activation_function == "relu":
-            gradient = relu_derivative(self.result)
-        
+    def back_prop(self, learning_rate=0.1):
+        gradient = self.derivative_func(self.result)
         delta = self.error * gradient
-        if self.index == -1:
-            for in_axon in self.inputs:
-                in_n = in_axon.input
-                in_n.error += delta * in_axon.weight
-                in_axon.weight -= learning_rate * delta * in_n.result
-        self.bias -= learning_rate * delta
-        self.b_prop_done = True
 
-    def draw(self, canvas, color='black'):
-        canvas.create_oval(self.x - neuron_scale, self.y - neuron_scale, self.x + neuron_scale, self.y + neuron_scale, fill=color)
+        for in_axon in self.inputs:
+            in_neuron = in_axon.input
+            # Update connection weight
+            in_axon.weight -= learning_rate * delta * in_neuron.result
+            # Propagate error
+            in_neuron.error += delta * in_axon.weight
+
+        # Update bias
+        self.bias -= learning_rate * delta
+        return delta
 
 class Axon:
-    def __init__(self, in_n, out_n, weight=None):
-        self.input = in_n
-        self.output = out_n
+    def __init__(self, input_neuron, output_neuron, weight=None):
+        self.input = input_neuron
+        self.output = output_neuron
         self.weight = weight if weight is not None else random.uniform(-1, 1)
 
-    def draw(self, canvas, color='grey'):
-        canvas.create_line(self.input.x, self.input.y, self.output.x, self.output.y, fill=color, width=axon_scale)
-
-class Network:
-    def __init__(self):
+class NeuralNetwork:
+    def __init__(self, input_count, hidden_layers, output_count, 
+                 activation_func=ActivationFunctions.sigmoid, 
+                 derivative_func=ActivationFunctions.sigmoid_derivative):
         self.inputs = []
         self.hidden_layers = []
         self.outputs = []
         
-        for idx in range(num_inputs):
-            in_n = Neuron(0, 0, idx, 1.0)
-            self.inputs.append(in_n)
+        # Create input layer
+        for idx in range(input_count):
+            self.inputs.append(
+                Neuron(activation_func, derivative_func, input_idx=idx, bias=1.0)
+            )
         
-        for layer in range(num_hidden_layers):
-            self.hidden_layers.append([])
-            for _ in range(hidden_layer_width):
-                hidden_n = Neuron(0, 0)
-                self.hidden_layers[layer].append(hidden_n)
-                if layer == 0:
-                    for in_n in self.inputs:
-                        hidden_n.connect_input(in_n)
-                        in_n.connect_output(hidden_n)
-                else:
-                    for h_n in self.hidden_layers[layer-1]:
-                        hidden_n.connect_input(h_n)
-                        h_n.connect_output(hidden_n)
+        # Create hidden layers
+        prev_layer = self.inputs
+        for layer_width in hidden_layers:
+            current_layer = []
+            for _ in range(layer_width):
+                neuron = Neuron(activation_func, derivative_func)
+                # Connect to previous layer
+                for prev_neuron in prev_layer:
+                    neuron.connect_input(prev_neuron)
+                    prev_neuron.connect_output(neuron)
+                current_layer.append(neuron)
+            self.hidden_layers.append(current_layer)
+            prev_layer = current_layer
         
-        for _ in range(num_outputs):
-            out_n = Neuron(0, 0)
-            self.outputs.append(out_n)
-            for h_n in self.hidden_layers[num_hidden_layers-1]:
-                out_n.connect_input(h_n)
-                h_n.connect_output(out_n)
+        # Create output layer
+        for _ in range(output_count):
+            output_neuron = Neuron(activation_func, derivative_func)
+            for prev_neuron in prev_layer:
+                output_neuron.connect_input(prev_neuron)
+                prev_neuron.connect_output(output_neuron)
+            self.outputs.append(output_neuron)
 
-    def forward_prop(self, inputs):
-        for in_n in self.inputs:
-            in_n.result = 0.0
-        for h_layer in self.hidden_layers:
-            for h_n in h_layer:
-                h_n.result = 0.0
-        for out_n in self.outputs:
-            out_n.result = 0.0
-            out_n.forward_prop(inputs)
-
-    def back_prop(self):
-        for h_layer in self.hidden_layers:
-            for h_n in h_layer:
-                h_n.error = 0.0
-                h_n.b_prop_done = False
-        for out_n in self.outputs:
-            out_n.error = 0.0
-            out_n.b_prop_done = False
-        for in_n in self.inputs:
-            in_n.error = 0.0
-            in_n.b_prop_done = False
-            in_n.back_prop()
-
-    def train(self, data):
-        self.forward_prop(data[0])
-        for x in range(num_outputs):
-            self.outputs[x].error = data[1][x] - self.outputs[x].result
-        self.back_prop()
-
-    def test(self, inputs):
-        self.forward_prop(inputs)
-        return [out_n.result for out_n in self.outputs]
-
-    def draw(self, canvas):
-        width = canvas.winfo_width()
-        height = canvas.winfo_height()
+    def train(self, inputs, targets, learning_rate=0.1):
+        # Forward propagation
+        self.predict(inputs)
         
-        layer_width = width / (num_hidden_layers + 2)
+        # Calculate output errors
+        for i, output_neuron in enumerate(self.outputs):
+            output_neuron.error = targets[i] - output_neuron.result
         
+        # Backpropagate
+        for output_neuron in reversed(self.outputs):
+            output_neuron.back_prop(learning_rate)
         
-        for i in range(num_hidden_layers + 2):
-            x = i * layer_width
-            canvas.create_line(x, 0, x, height, fill='lightgrey', dash=(4, 2))
-        
-        for idx, neuron in enumerate(self.inputs):
-            neuron.x = layer_width / 2
-            neuron.y = height * (idx + 1) / (len(self.inputs) + 1)
-            neuron.draw(canvas, 'red')
-        
-        for layer_idx, layer in enumerate(self.hidden_layers):
-            for idx, neuron in enumerate(layer):
-                neuron.x = layer_width * (layer_idx + 1.5)
-                neuron.y = height * (idx + 1) / (len(layer) + 1)
-                neuron.draw(canvas, 'blue')
-        
-        for idx, neuron in enumerate(self.outputs):
-            neuron.x = width - layer_width / 2
-            neuron.y = height * (idx + 1) / (len(self.outputs) + 1)
-            neuron.draw(canvas, 'green')
-        
-        for layer in self.hidden_layers + [self.outputs]:
+        # Backpropagate through hidden layers
+        for layer in reversed(self.hidden_layers):
             for neuron in layer:
-                for axon in neuron.inputs:
-                    axon.draw(canvas)
+                neuron.back_prop(learning_rate)
 
-class App:
+    def predict(self, inputs):
+        # Reset results for all neurons
+        for neuron in self.inputs + [n for layer in self.hidden_layers for n in layer] + self.outputs:
+            if neuron.index == -1:
+                neuron.result = 0.0
+        
+        # Perform forward propagation
+        return [output_neuron.forward_prop(inputs) for output_neuron in self.outputs]
+
+
+class EnhancedNeuralNetworkUI:
     def __init__(self, master):
         self.master = master
-        self.master.title("Neural Network Visualization")
-        self.master.state('zoomed')  
-
-        self.network = None
-        self.data = self.generate_dataset()
-
-        self.create_menu()
-        self.create_canvas()
-
-    def create_menu(self):
-        menubar = tk.Menu(self.master)
-        self.master.config(menu=menubar)
-
-        file_menu = tk.Menu(menubar, tearoff=0)
-        file_menu.add_command(label="Generate New Dataset", command=self.generate_new_dataset)
-        menubar.add_cascade(label="File", menu=file_menu)
-
-        network_menu = tk.Menu(menubar, tearoff=0)
-        network_menu.add_command(label="Generate Network", command=self.generate_network)
-        network_menu.add_command(label="Train Network", command=self.train_network)
-        menubar.add_cascade(label="Network", menu=network_menu)
-
-        settings_menu = tk.Menu(menubar, tearoff=0)
-        settings_menu.add_command(label="Network Settings", command=self.open_settings)
-        menubar.add_cascade(label="Settings", menu=settings_menu)
-
-    def create_canvas(self):
-        self.canvas = tk.Canvas(self.master, bg='white')
-        self.canvas.pack(fill=tk.BOTH, expand=True)
-
-    def generate_dataset(self):
-        data = []
-        for _ in range(1000):
-            inputs = [random.uniform(0, 1) for _ in range(num_inputs)]
-            output = [sum(inputs) / len(inputs)]  
-            data.append((inputs, output))
-        return data
-
-    def generate_new_dataset(self):
-        self.data = self.generate_dataset()
-        messagebox.showinfo("Dataset Generated", "New dataset has been generated.")
-
-    def generate_network(self):
-        self.network = Network()
-        self.data = self.generate_dataset()  
-        self.draw_network()
-
-    def train_network(self):
-        if not self.network:
-            messagebox.showerror("Error", "Please generate a network first")
+        master.title("Enhanced Neural Network")
+        
+        # Create main frame
+        self.main_frame = tk.Frame(master)
+        self.main_frame.pack(fill=tk.BOTH, expand=True)
+        
+        # Configuration Frame
+        self.config_frame = tk.Frame(self.main_frame)
+        self.config_frame.pack(side=tk.TOP, fill=tk.X, padx=10, pady=10)
+        
+        # Network Configuration Widgets
+        self.setup_configuration_widgets()
+        
+        # Canvas for network visualization
+        self.canvas_frame = tk.Frame(self.main_frame)
+        self.canvas_frame.pack(side=tk.TOP, fill=tk.BOTH, expand=True)
+        
+        self.canvas = tk.Canvas(self.canvas_frame, width=800, height=600, bg='white')
+        self.canvas.pack(expand=True, fill=tk.BOTH)
+        
+        # Status Frame
+        self.status_frame = tk.Frame(self.main_frame)
+        self.status_frame.pack(side=tk.BOTTOM, fill=tk.X, padx=10, pady=10)
+        
+        self.status_label = tk.Label(self.status_frame, text="Ready", anchor='w')
+        self.status_label.pack(side=tk.LEFT, expand=True, fill=tk.X)
+        
+        # Network state
+        self.current_network = None
+        self.current_dataset = None
+        self.normalization_params = None
+    
+    def setup_configuration_widgets(self):
+        # Input Count
+        tk.Label(self.config_frame, text="Number of Inputs:").grid(row=0, column=0)
+        self.input_entry = tk.Entry(self.config_frame)
+        self.input_entry.grid(row=0, column=1)
+        
+        # Hidden Layers
+        tk.Label(self.config_frame, text="Hidden Layer Sizes:").grid(row=1, column=0)
+        self.hidden_layers_entry = tk.Entry(self.config_frame)
+        self.hidden_layers_entry.grid(row=1, column=1)
+        
+        # Output Count
+        tk.Label(self.config_frame, text="Number of Outputs:").grid(row=2, column=0)
+        self.output_entry = tk.Entry(self.config_frame)
+        self.output_entry.grid(row=2, column=1)
+        
+        # Activation Function
+        tk.Label(self.config_frame, text="Activation:").grid(row=3, column=0)
+        self.activation_var = tk.StringVar(value="sigmoid")
+        activation_options = ["sigmoid", "tanh", "relu"]
+        tk.OptionMenu(self.config_frame, self.activation_var, *activation_options).grid(row=3, column=1)
+        
+        # Buttons
+        tk.Button(self.config_frame, text="Load Dataset", command=self.load_dataset).grid(row=4, column=0)
+        tk.Button(self.config_frame, text="Create Network", command=self.create_network).grid(row=4, column=1)
+        tk.Button(self.config_frame, text="Train Network", command=self.train_network).grid(row=4, column=2)
+    
+    def load_dataset(self):
+        filepath = filedialog.askopenfilename(
+            title="Select CSV Dataset", 
+            filetypes=[("CSV files", "*.csv")]
+        )
+        if not filepath:
             return
-        if not self.data:
-            messagebox.showerror("Error", "No dataset available")
-            return
         
-        
-        train_window = tk.Toplevel(self.master)
-        train_window.title("Training Progress")
-        train_window.geometry("400x200")
-
-        
-        progress = ttk.Progressbar(train_window, length=300, mode='determinate')
-        progress.pack(pady=20)
-
-        
-        info_label = tk.Label(train_window, text="Starting training...")
-        info_label.pack()
-        
-        error_label = tk.Label(train_window, text="")
-        error_label.pack()
-
-        train_window.update()
-
-        total_error = 0
-        for i in range(training_data_size):
-            data_point = random.choice(self.data)
-            self.network.train(data_point)
+        try:
+            # Load dataset
+            inputs, outputs, norm_params = DataLoader.load_csv(filepath)
             
+            # Update UI with dataset dimensions
+            self.input_entry.delete(0, tk.END)
+            self.input_entry.insert(0, str(inputs.shape[1]))
             
-            self.network.forward_prop(data_point[0])
-            error = abs(self.network.outputs[0].result - data_point[1][0])
-            total_error += error
-
+            self.output_entry.delete(0, tk.END)
+            self.output_entry.insert(0, str(outputs.shape[1]))
             
-            progress['value'] = (i + 1) / training_data_size * 100
-            info_label.config(text=f"Training sample {i+1}/{training_data_size}")
-            error_label.config(text=f"Current error: {error:.4f}")
-            train_window.update()
-            time.sleep(0.01)  
-
-        average_error = total_error / training_data_size
-        info_label.config(text="Training complete!")
-        error_label.config(text=f"Average error: {average_error:.4f}")
+            self.current_dataset = (inputs, outputs)
+            self.normalization_params = norm_params
+            
+            self.status_label.config(text=f"Loaded dataset: {inputs.shape[0]} samples")
+            messagebox.showinfo("Dataset Loaded", f"Loaded {inputs.shape[0]} samples with {inputs.shape[1]} inputs and {outputs.shape[1]} outputs")
         
-        self.draw_network()
-        messagebox.showinfo("Training Complete", f"Network trained on {training_data_size} samples\nAverage error: {average_error:.4f}")
-        train_window.destroy()
-
-    def open_settings(self):
-        settings_window = tk.Toplevel(self.master)
-        settings_window.title("Network Settings")
-
-        tk.Label(settings_window, text="Number of Hidden Layers:").grid(row=0, column=0)
-        hidden_layers_entry = tk.Entry(settings_window)
-        hidden_layers_entry.insert(0, str(num_hidden_layers))
-        hidden_layers_entry.grid(row=0, column=1)
-
-        tk.Label(settings_window, text="Hidden Layer Width:").grid(row=1, column=0)
-        hidden_width_entry = tk.Entry(settings_window)
-        hidden_width_entry.insert(0, str(hidden_layer_width))
-        hidden_width_entry.grid(row=1, column=1)
-
-        tk.Label(settings_window, text="Activation Function:").grid(row=2, column=0)
-        activation_var = tk.StringVar(value=activation_function)
-        tk.OptionMenu(settings_window, activation_var, "sigmoid", "tanh", "relu").grid(row=2, column=1)
-
-        def save_settings():
-            global num_hidden_layers, hidden_layer_width, activation_function
-            num_hidden_layers = int(hidden_layers_entry.get())
-            hidden_layer_width = int(hidden_width_entry.get())
-            activation_function = activation_var.get()
-            self.network = None  
-            settings_window.destroy()
-
-        tk.Button(settings_window, text="Save", command=save_settings).grid(row=3, column=0, columnspan=2)
-
-    def draw_network(self):
+        except Exception as e:
+            messagebox.showerror("Loading Error", str(e))
+    
+    def create_network(self):
+        try:
+            inputs = int(self.input_entry.get())
+            hidden_layers = [int(x) for x in self.hidden_layers_entry.get().split(',')]
+            outputs = int(self.output_entry.get())
+            
+            activation_func_map = {
+                "sigmoid": (ActivationFunctions.sigmoid, ActivationFunctions.sigmoid_derivative),
+                "tanh": (ActivationFunctions.tanh, ActivationFunctions.tanh_derivative),
+                "relu": (ActivationFunctions.relu, ActivationFunctions.relu_derivative)
+            }
+            
+            activation_func, derivative_func = activation_func_map[self.activation_var.get()]
+            
+            self.current_network = NeuralNetwork(
+                inputs, hidden_layers, outputs, 
+                activation_func, derivative_func
+            )
+            
+            # Visualize with enhanced details
+            self.visualize_network_detailed()
+            
+            self.status_label.config(text="Network created successfully")
+        except Exception as e:
+            messagebox.showerror("Network Creation Error", str(e))
+    
+    def visualize_network_detailed(self):
         self.canvas.delete("all")
-        if self.network:
-            self.network.draw(self.canvas)
+        width = self.canvas.winfo_width()
+        height = self.canvas.winfo_height()
+        
+        # Collect all layers
+        all_layers = [self.current_network.inputs] + \
+                     self.current_network.hidden_layers + \
+                     [self.current_network.outputs]
+        
+        # Calculate spacing
+        layer_spacing = width / (len(all_layers) + 1)
+        max_layer_size = max(len(layer) for layer in all_layers)
+        
+        # Color gradient for connections
+        def get_connection_color(weight):
+            # Blue for positive, red for negative weights
+            intensity = min(abs(weight) * 5, 255)
+            return f'#{int(255 if weight < 0 else 0):02x}{int(255 if weight > 0 else 0):02x}{0:02x}'
+        
+        # Draw neurons and connections
+        for layer_idx, layer in enumerate(all_layers):
+            x = layer_spacing * (layer_idx + 1)
+            layer_height = height * 0.8
+            neuron_spacing = layer_height / (len(layer) + 1)
+            
+            for neuron_idx, neuron in enumerate(layer):
+                y = height * 0.1 + neuron_spacing * (neuron_idx + 1)
+                neuron.x, neuron.y = x, y
+                
+                # Neuron representation
+                neuron_color = self.get_neuron_color(neuron.result)
+                self.canvas.create_oval(
+                    x-15, y-15, x+15, y+15, 
+                    fill=neuron_color, 
+                    outline='black'
+                )
+                
+                # Connections to next layer
+                if layer_idx < len(all_layers) - 1:
+                    next_layer = all_layers[layer_idx + 1]
+                    for next_neuron in next_layer:
+                        # Find corresponding axon
+                        matching_axons = [
+                            axon for axon in neuron.outputs 
+                            if axon.output == next_neuron
+                        ]
+                        
+                        if matching_axons:
+                            axon = matching_axons[0]
+                            # Connection thickness based on weight magnitude
+                            line_width = min(abs(axon.weight) * 3, 5)
+                            
+                            self.canvas.create_line(
+                                x, y, 
+                                next_neuron.x, next_neuron.y,
+                                fill=get_connection_color(axon.weight),
+                                width=line_width
+                            )
+    
+    def get_neuron_color(self, activation):
+        """Generate color based on neuron activation"""
+        # Blue gradient from pale to deep blue
+        intensity = int(min(max(activation, 0), 1) * 255)
+        return f'#{intensity:02x}{intensity:02x}ff'
+    
+    def train_network(self):
+        if not self.current_network:
+            messagebox.showwarning("Warning", "Create a network first!")
+            return
+        
+        if self.current_dataset is None:
+            messagebox.showwarning("Warning", "Load a dataset first!")
+            return
+        
+        inputs, outputs = self.current_dataset
+        
+        # Training parameters
+        epochs = simpledialog.askinteger(
+            "Training", "Number of Epochs:", 
+            initialvalue=100, minvalue=1
+        )
+        
+        if not epochs:
+            return
+        
+        # Track training progress
+        training_loss = []
+        
+        for epoch in range(epochs):
+            total_loss = 0
+            
+            # Shuffle data
+            indices = np.random.permutation(len(inputs))
+            
+            for idx in indices:
+                # Train on single sample
+                network_output = self.current_network.predict(inputs[idx])
+                self.current_network.train(inputs[idx], outputs[idx])
+                
+                # Calculate loss (mean squared error)
+                epoch_loss = np.mean((network_output - outputs[idx])**2)
+                total_loss += epoch_loss
+            
+            training_loss.append(total_loss / len(inputs))
+            
+            # Update visualization every 10 epochs
+            if epoch % 10 == 0:
+                self.visualize_network_detailed()
+                self.status_label.config(
+                    text=f"Training: Epoch {epoch}, Loss: {training_loss[-1]:.4f}"
+                )
+                self.master.update()
+        
+        messagebox.showinfo(
+            "Training Complete", 
+            f"Training finished in {epochs} epochs\nFinal Loss: {training_loss[-1]:.4f}"
+        )
+
+def main():
+    root = tk.Tk()
+    root.geometry("1200x800")
+    app = EnhancedNeuralNetworkUI(root)
+    root.mainloop()
 
 if __name__ == '__main__':
-    root = tk.Tk()
-    app = App(root)
-    root.mainloop()
+    main()
